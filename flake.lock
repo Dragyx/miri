@@ -16,23 +16,9 @@
         "type": "github"
       }
     },
-    "nixpkgs-small": {
-      "locked": {
-        "lastModified": 1770371248,
-        "narHash": "sha256-PGKzEBaH9MIrPbAeRAQIqb7WlLPlLE7X6wxoc0fiiIo=",
-        "path": "/nix/store/3zlz86mbxv8g29b79k6xk93d0ghqh4c8-source",
-        "rev": "b9585574e50fbf4ee6dc23fd2647fa8683d80b2b",
-        "type": "path"
-      },
-      "original": {
-        "id": "nixpkgs-small",
-        "type": "indirect"
-      }
-    },
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
-        "nixpkgs-small": "nixpkgs-small",
         "rust-overlay": "rust-overlay"
       }
     },

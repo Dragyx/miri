@@ -16,7 +16,6 @@
       self,
       rust-overlay,
       nixpkgs,
-      nixpkgs-small,
     }:
     let
       inherit (nixpkgs) lib;
@@ -42,15 +41,15 @@
         system: pkgs:
         let
           rust-target = pkgs.stdenv.targetPlatform.rust.rustcTarget;
-          components = [
-            "rustc"
-            "cargo"
-            "rust-src"
-            "rust-std"
-            "rustc-dev"
-          ];
-          componentToHash =
-            compName:
+          components = {
+            "rustc" = "";
+            "cargo" = "";
+            "rust-src" = "";
+            "rust-std" = "";
+            "rustc-dev" = "";
+          };
+          computeMissingHashes =
+            compName: hash:
             (
               let
                 component = builtins.fetchurl {
@@ -61,24 +60,6 @@
                       "https://ci-artifacts.rust-lang.org/rustc-builds/${rust-lang-commit}/${compName}-nightly-${rust-target}.tar.xz";
                 };
                 hashAlgo = "sha256";
-                # Convert to SRI using nix-hash command at build time
-                # sriHash =
-
-                #   builtins.readFile (
-                #     pkgs.runCommand "hash-${compName}"
-                #       {
-                #       }
-                #       (
-                #         let
-                #           nix-hash = getExe' pkgs.nix "nix-hash";
-                #         in
-                #         ''
-                #           hash="$(${nix-hash} --type ${hashAlgo} --flat ${component} || exit 1)"
-                #           hash_sri="$(${nix-hash} --type ${hashAlgo} --to-sri $hash || exit 1)"
-                #           echo $hash_sri > $out
-                #         ''
-                #       )
-                #   );
                 sriHash = builtins.convertHash {
                   inherit hashAlgo;
                   hash = builtins.hashFile hashAlgo component;
@@ -91,12 +72,12 @@
                     sriHash;
 
               in
-              sriHashValidated
+              if (hash == "") then sriHashValidated else hash
             );
           rustc = (
             pkgs.rust-bin.fromRustcRev {
               rev = rust-lang-commit;
-              components = lib.genAttrs components componentToHash;
+              components = lib.mapAttrs components computeMissingHashes;
             }
           );
           rustPlatform = pkgs.makeRustPlatform {
@@ -118,21 +99,29 @@
               miri-script
               cargo-miri
               rustc
+              pkgs.libc
+              pkgs.eza
             ];
             name = "miri";
             src = ./.;
             cargoLock = {
               lockFile = ./Cargo.lock;
             };
-
-            buildType = "debug";
             checkPhase = ''
               runHook preCheck
-              export RUSTC=${getExe' self.packages.${system}.rustc "rustc"}
-                export MIRI_SYSROOT=./target/${buildType}/)
-              cargo test
+              export CARGO_TARGET_DIR="$TMPDIR/target"
+
+              # Run library unit tests (these should pass)
+              cargo miri test --lib --release
+
               runHook postCheck
             '';
+
+            buildType = "debug";
+            MIRI_SYSROOT = "${self.packages.${system}.rustc}/lib/rustlib/${rust-target}/lib";
+            RUSTC_BOOTSTRAP = "1";
+            MIRI_SKIP_UI_CHECKS = "1";
+            CC = "${pkgs.gcc}/bin/gcc";
           };
           genmc-sys = rustPlatform.buildRustPackage {
             name = "genmc-sys";
@@ -163,10 +152,6 @@
             cargoLock = {
               lockFile = ./cargo-miri/Cargo.lock;
             };
-            # FIXME: maybe move?
-            postInstall = ''
-              ln $out/bin/cargo-miri $out/bin/miri
-            '';
             buildType = "release";
           };
         }
@@ -176,13 +161,15 @@
         lib.mapAttrs (system: pkgs: {
           default = pkgs.mkShell {
             shellHook = ''
-              export RUSTC={self.packages.{system}.cargo-miri}/bin/miri
+              export RUSTC=${self.packages.${system}.rustc}
+              export PATH="${self.packages.${system}.miri}/bin:${self.packages.${system}.cargo-miri}/bin:$PATH"
+              export MIRI="${self.packages.${system}.miri}/bin/miri"
             '';
 
             buildInputs = with self.packages.${system}; [
               rustc
               miri
-              # miri-script
+              miri-script
               cargo-miri
             ];
           };

@@ -93,7 +93,6 @@ fn main() {
 
         return;
     }
-
     match first.as_str() {
         "miri" => phase_cargo_miri(args),
         "runner" => phase_runner(args, RunnerPhase::Cargo),
