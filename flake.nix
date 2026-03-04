@@ -2,7 +2,9 @@
   description = "A very basic flake";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-25.11";
+    # Unfortunatly, we need builtins.convertHash which is not yet in unstable.
+    # nixpkgs-small.url = "https://channels.nixos.org/nixos-unstable-small/nixexprs.tar.xz";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -14,9 +16,12 @@
       self,
       rust-overlay,
       nixpkgs,
+      nixpkgs-small,
     }:
     let
       inherit (nixpkgs) lib;
+      # inherit (nixpkgs-small.lib) convertHash;
+      inherit (lib) getExe';
       systems = lib.systems.flakeExposed;
       pkgsFor = lib.genAttrs systems (
         system:
@@ -36,17 +41,62 @@
       packages = lib.mapAttrs (
         system: pkgs:
         let
+          rust-target = pkgs.stdenv.targetPlatform.rust.rustcTarget;
+          components = [
+            "rustc"
+            "cargo"
+            "rust-src"
+            "rust-std"
+            "rustc-dev"
+          ];
+          componentToHash =
+            compName:
+            (
+              let
+                component = builtins.fetchurl {
+                  url =
+                    if compName == "rust-src" then
+                      "https://ci-artifacts.rust-lang.org/rustc-builds/${rust-lang-commit}/${compName}-nightly.tar.xz"
+                    else
+                      "https://ci-artifacts.rust-lang.org/rustc-builds/${rust-lang-commit}/${compName}-nightly-${rust-target}.tar.xz";
+                };
+                hashAlgo = "sha256";
+                # Convert to SRI using nix-hash command at build time
+                # sriHash =
+
+                #   builtins.readFile (
+                #     pkgs.runCommand "hash-${compName}"
+                #       {
+                #       }
+                #       (
+                #         let
+                #           nix-hash = getExe' pkgs.nix "nix-hash";
+                #         in
+                #         ''
+                #           hash="$(${nix-hash} --type ${hashAlgo} --flat ${component} || exit 1)"
+                #           hash_sri="$(${nix-hash} --type ${hashAlgo} --to-sri $hash || exit 1)"
+                #           echo $hash_sri > $out
+                #         ''
+                #       )
+                #   );
+                sriHash = builtins.convertHash {
+                  inherit hashAlgo;
+                  hash = builtins.hashFile hashAlgo component;
+                  toHashFormat = "sri";
+                };
+                sriHashValidated =
+                  if (sriHash == "") then
+                    throw "Failed to compute SRI hash for ${compName} : ${component}"
+                  else
+                    sriHash;
+
+              in
+              sriHashValidated
+            );
           rustc = (
             pkgs.rust-bin.fromRustcRev {
               rev = rust-lang-commit;
-              components = {
-                rustc = "sha256-yWThZ66Mcyy+hBPIQNw9HTwI0j6Yv3OHyOnm4kls7kI=";
-                rust-src = "sha256-Eb5XuVcHEBfQmzBEFT6cL7xjkVkQOXBo5Ng82ZjVz8Y=";
-                rust-std = "sha256-ialn9Zxp9o09daONKjgVcRFm9KWDOYTGC6qIb6T/jqM=";
-                rustc-dev = "sha256-6Iohot3JiWdrau0D3rMiTwqoV65cDW5wYnEEIzuvBKI=";
-                # llvm-tools-preview = "sha256-ialn9Zxd9o09daONKjgVcRFm9KWDOaTGC6qIb6T/jqM=";
-                cargo = "sha256-WXK6hZExYIYPhJCyC/zvVEKWwgHxNlVFutytG9tVoRY=";
-              };
+              components = lib.genAttrs components componentToHash;
             }
           );
           rustPlatform = pkgs.makeRustPlatform {
@@ -63,10 +113,11 @@
         {
           default = self.packages.${system}.miri;
           inherit rustc;
-          miri = rustPlatform.buildRustPackage {
+          miri = rustPlatform.buildRustPackage rec {
             nativeBuildInputs = with self.packages.${system}; [
               miri-script
               cargo-miri
+              rustc
             ];
             name = "miri";
             src = ./.;
@@ -77,8 +128,9 @@
             buildType = "debug";
             checkPhase = ''
               runHook preCheck
-              export RUSTC=${self.packages.${system}.rustc}
-              # cargo miri test runner
+              export RUSTC=${getExe' self.packages.${system}.rustc "rustc"}
+                export MIRI_SYSROOT=./target/${buildType}/)
+              cargo test
               runHook postCheck
             '';
           };
@@ -119,19 +171,21 @@
           };
         }
       ) pkgsFor;
-      devShells = lib.mapAttrs (system: pkgs: {
-        default = pkgs.mkShell {
-          shellHook = ''
-            export RUSTC=${self.packages.${system}.cargo-miri}/bin/miri
-          '';
+      devShells =
 
-          buildInputs = with self.packages.${system}; [
-            rustc
-            miri
-            # miri-script
-            cargo-miri
-          ];
-        };
-      }) pkgsFor;
+        lib.mapAttrs (system: pkgs: {
+          default = pkgs.mkShell {
+            shellHook = ''
+              export RUSTC={self.packages.{system}.cargo-miri}/bin/miri
+            '';
+
+            buildInputs = with self.packages.${system}; [
+              rustc
+              miri
+              # miri-script
+              cargo-miri
+            ];
+          };
+        }) pkgsFor;
     };
 }
