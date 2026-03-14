@@ -3,8 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-25.11";
-    # Unfortunatly, we need builtins.convertHash which is not yet in unstable.
-    # nixpkgs-small.url = "https://channels.nixos.org/nixos-unstable-small/nixexprs.tar.xz";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -19,8 +17,7 @@
     }:
     let
       inherit (nixpkgs) lib;
-      # inherit (nixpkgs-small.lib) convertHash;
-      inherit (lib) getExe';
+
       systems = lib.systems.flakeExposed;
       pkgsFor = lib.genAttrs systems (
         system:
@@ -42,11 +39,11 @@
         let
           rust-target = pkgs.stdenv.targetPlatform.rust.rustcTarget;
           components = {
-            "rustc" = "";
-            "cargo" = "";
-            "rust-src" = "";
-            "rust-std" = "";
-            "rustc-dev" = "";
+            "rustc" = null;
+            "cargo" = null;
+            "rust-src" = null;
+            "rust-std" = null;
+            "rustc-dev" = null;
           };
           computeMissingHashes =
             compName: hash:
@@ -66,34 +63,41 @@
                   toHashFormat = "sri";
                 };
                 sriHashValidated =
-                  if (sriHash == "") then
+                  if (hash != null) then
+                    hash
+                  else if (sriHash == "") then
                     throw "Failed to compute SRI hash for ${compName} : ${component}"
                   else
                     sriHash;
 
               in
-              if (hash == "") then sriHashValidated else hash
+              sriHashValidated
             );
           rustc = (
             pkgs.rust-bin.fromRustcRev {
               rev = rust-lang-commit;
-              components = lib.mapAttrs components computeMissingHashes;
+              components = lib.mapAttrs computeMissingHashes components;
             }
           );
+          rustComponents = lib.mapAttrs (
+            component: _hash:
+            lib.findFirst (
+              c: "${component}-${c.version}-${c.passthru.platform}" == c.name
+            ) (throw "Failed to find component ${component}") self.packages.${system}.rustc.availableComponents
+          ) components;
           rustPlatform = pkgs.makeRustPlatform {
             inherit rustc;
-            inherit (rustc)
-              rust-src
-              rust-std
-              rustc-dev
-              llvm-tools-preview
-              ;
             cargo = rustc;
           };
         in
         {
           default = self.packages.${system}.miri;
           inherit rustc;
+          inherit (rustComponents)
+            rust-src
+            rust-std
+            rustc-dev
+            ;
           miri = rustPlatform.buildRustPackage rec {
             nativeBuildInputs = with self.packages.${system}; [
               miri-script
@@ -109,18 +113,15 @@
             };
             checkPhase = ''
               runHook preCheck
-              export CARGO_TARGET_DIR="$TMPDIR/target"
 
-              # Run library unit tests (these should pass)
-              cargo miri test --lib --release
-
+              cargo test --lib
               runHook postCheck
             '';
 
             buildType = "debug";
             MIRI_SYSROOT = "${self.packages.${system}.rustc}/lib/rustlib/${rust-target}/lib";
             RUSTC_BOOTSTRAP = "1";
-            MIRI_SKIP_UI_CHECKS = "1";
+
             CC = "${pkgs.gcc}/bin/gcc";
           };
           genmc-sys = rustPlatform.buildRustPackage {
