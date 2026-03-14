@@ -1,7 +1,15 @@
-#![cfg_attr(bootstrap, feature(if_let_guard))]
-#![cfg_attr(bootstrap, feature(cfg_select))]
-#![feature(abort_unwind)]
+#![cfg_attr(all(feature = "native-lib", unix), feature(iter_advance_by))]
+#![cfg_attr(
+    all(
+        feature = "native-lib",
+        target_os = "linux",
+        target_env = "gnu",
+        any(target_arch = "x86", target_arch = "x86_64")
+    ),
+    feature(abort_unwind)
+)]
 #![feature(rustc_private)]
+#![feature(f16)]
 #![feature(float_gamma)]
 #![feature(float_erf)]
 #![feature(map_try_insert)]
@@ -10,14 +18,12 @@
 #![feature(io_error_more)]
 #![feature(variant_count)]
 #![feature(yeet_expr)]
-#![feature(nonzero_ops)]
 #![feature(pointer_is_aligned_to)]
-#![feature(ptr_metadata)]
 #![feature(unqualified_local_imports)]
 #![feature(derive_coerce_pointee)]
 #![feature(arbitrary_self_types)]
-#![feature(iter_advance_by)]
 #![feature(macro_metavar_expr)]
+#![feature(uint_carryless_mul)]
 // Configure clippy and other lints
 #![allow(
     clippy::collapsible_else_if,
@@ -101,7 +107,7 @@ pub use rustc_const_eval::interpret::{self, AllocMap, Provenance as _};
 use rustc_log::tracing::{self, info, trace};
 use rustc_middle::{bug, span_bug};
 
-#[cfg(all(unix, feature = "native-lib"))]
+#[cfg(all(feature = "native-lib", unix))]
 pub mod native_lib {
     pub use crate::shims::{init_sv, register_retcode_sv};
 }
