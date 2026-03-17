@@ -39,11 +39,11 @@
         let
           rust-target = pkgs.stdenv.targetPlatform.rust.rustcTarget;
           components = {
-            "rustc" = null;
-            "cargo" = null;
-            "rust-src" = null;
-            "rust-std" = null;
-            "rustc-dev" = null;
+            rustc = null;
+            cargo = null;
+            rust-src = null;
+            rust-std = null;
+            rustc-dev = null;
           };
           computeMissingHashes =
             compName: hash:
